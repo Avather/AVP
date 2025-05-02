@@ -1,0 +1,5 @@
+0 Bike
+1 Clear_Road
+2 Green_light
+3 Red_Light
+4 Vehicle_detected

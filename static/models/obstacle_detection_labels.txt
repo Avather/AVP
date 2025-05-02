@@ -1,0 +1,15 @@
+0 Bus
+1 Car
+2 Cat
+3 Chair
+4 Cow
+5 Cycle
+6 Dog
+7 goat
+8 Lorry
+9 Man
+10 Potholes
+11 Stairs
+12 table
+13 Tree
+14 Woman
