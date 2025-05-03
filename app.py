@@ -2,15 +2,19 @@ import os
 import io
 import numpy as np
 from PIL import Image
-from flask import Flask, request, jsonify
-from modules.speak_helper import speak  # Uses macOS 'say' for speech
+from flask import Flask, request, jsonify, session
+from flask_cors import CORS
 
-import tensorflow as tf
+import tflite_runtime.interpreter as tflite
+from scipy.special import softmax
 
 app = Flask(__name__)
+CORS(app)
+app.secret_key = "ava_vision_secret"
 
 # === Configuration ===
-MODEL_DIR = "static/models"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_DIR = os.path.join(BASE_DIR, "static", "models")
 MODEL_SUFFIX = ".tflite"
 LABEL_SUFFIX = "_labels.txt"
 DEFAULT_INPUT_SIZE = (224, 224)
@@ -32,7 +36,7 @@ def load_model(model_name):
         if not os.path.exists(label_path):
             raise FileNotFoundError(f"Label file not found: {label_path}")
 
-        interpreter = tf.lite.Interpreter(model_path=model_path)
+        interpreter = tflite.Interpreter(model_path=model_path)
         interpreter.allocate_tensors()
         labels = load_labels(label_path)
         input_type = interpreter.get_input_details()[0]['dtype']
@@ -50,8 +54,41 @@ def preprocess_image(image_bytes, input_size, input_type):
     else:
         return np.expand_dims(img_array / 255.0, axis=0).astype(np.float32)
 
-@app.route("/predict/<model_name>", methods=["POST"])
-def predict(model_name):
+@app.route("/set_mode", methods=["POST"])
+def set_mode():
+    data = request.get_json()
+    mode = data.get("mode")
+    if mode not in ["obstacle_detection", "currency_detection", "road_crossing_assistance"]:
+        return jsonify({"error": "Invalid mode"}), 400
+    session["active_mode"] = mode
+    return jsonify({"message": f"Mode set to {mode}"})
+
+
+@app.route("/voice_command", methods=["POST"])
+def voice_command():
+    command = request.json.get("command", "").lower()
+
+    if "stop" in command:
+        session.pop("active_mode", None)
+        return jsonify({"message": "Current mode stopped"})
+
+    elif "currency detection" in command:
+        session["active_mode"] = "currency_detection"
+    elif "obstacle detection" in command:
+        session["active_mode"] = "obstacle_detection"
+    elif "road crossing assistance" in command or "road" in command or "crossing" in command:
+        session["active_mode"] = "road_crossing_assistance"
+    else:
+        return jsonify({"error": "Unrecognized command"}), 400
+
+    return jsonify({"message": f"Mode set via voice to {session['active_mode']}"})
+
+@app.route("/predict", methods=["POST"])
+def predict():
+    model_name = session.get("active_mode")
+    if not model_name:
+        return jsonify({"error": "No mode set. Please call /set_mode or /voice_command first."}), 400
+
     if "image" not in request.files:
         return jsonify({"error": "No image provided"}), 400
 
@@ -73,53 +110,53 @@ def predict(model_name):
         interpreter.invoke()
         output = interpreter.get_tensor(output_details[0]['index'])[0]
 
-        # Apply softmax if required
         if input_type == np.uint8:
             predictions = output
         else:
-            predictions = tf.nn.softmax(output).numpy()
+            predictions = softmax(output).tolist()
 
         predicted_index = int(np.argmax(predictions))
         confidence = float(predictions[predicted_index])
         label = labels[predicted_index] if predicted_index < len(labels) else "Unknown"
 
-        print(f"\n📌 Prediction log for: {model_name}")
-        print(f"🔢 Raw model output: {predictions}")
-        print(f"✅ Predicted index: {predicted_index}")
-        print(f"🏷️ Label: {label}")
-        print(f"📈 Confidence: {round(confidence, 3)}")
-
-        # Detailed confidence breakdown
         confidence_per_class = [
             {"label": lbl, "confidence": round(float(conf), 3)}
             for lbl, conf in zip(labels, predictions)
         ]
 
-        # === Voice Feedback Logic ===
+        voice_text = ""
         if model_name in ["road_crossing_assistance", "enhanced_road_crossing", "vehicle_assistance"]:
             if "do_not_cross" in label.lower() or "red_light" in label.lower():
-                speak("Do Not Cross")
+                voice_text = "Do Not Cross"
             elif "safe_to_cross" in label.lower() or "green_light" in label.lower():
-                speak("Safe to Cross")
+                voice_text = "Safe to Cross"
             elif "vehicle_detected" in label.lower():
-                speak("Vehicle ahead, please stop")
+                voice_text = "Vehicle ahead, please stop"
             elif "clear_road" in label.lower():
-                speak("Road is clear, proceed carefully")
+                voice_text = "Road is clear, proceed carefully"
         elif model_name == "currency_detection":
-            speak(f"{label} detected")
+            voice_text = f"{label} detected"
         elif model_name == "obstacle_detection":
-            speak(f"Obstacle ahead: {label}")
+            voice_text = f"Obstacle ahead: {label}"
 
         return jsonify({
             "predicted_class": predicted_index,
             "label": label,
             "confidence": round(confidence, 3),
-            "confidence_per_class": confidence_per_class
+            "confidence_per_class": confidence_per_class,
+            "voice_text": voice_text
         })
 
     except Exception as e:
         return jsonify({"error": f"Inference failed: {str(e)}"}), 500
 
+@app.route("/")
+def index():
+    return (
+        "<h2>✅ AvaTherVisionPro API is running</h2>"
+        "<p>Use <code>POST /set_mode</code> or <code>/voice_command</code>.</p>"
+        "<p>Then <code>POST /predict</code> with an image file.</p>"
+    )
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5050, debug=True)
-
