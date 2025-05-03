@@ -125,7 +125,7 @@ def predict():
         ]
 
         voice_text = ""
-        if model_name in ["road_crossing_assistance", "enhanced_road_crossing", "vehicle_assistance"]:
+        if model_name == "road_crossing_assistance":
             if "do_not_cross" in label.lower() or "red_light" in label.lower():
                 voice_text = "Do Not Cross"
             elif "safe_to_cross" in label.lower() or "green_light" in label.lower():
@@ -138,6 +138,10 @@ def predict():
             voice_text = f"{label} detected"
         elif model_name == "obstacle_detection":
             voice_text = f"Obstacle ahead: {label}"
+
+        # Return only voice_text if requested (audio_only=true)
+        if request.args.get("audio_only") == "true":
+            return jsonify({"voice_text": voice_text})
 
         return jsonify({
             "predicted_class": predicted_index,
