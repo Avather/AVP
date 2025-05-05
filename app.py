@@ -5,7 +5,7 @@ from PIL import Image
 from flask import Flask, request, jsonify, session
 from flask_cors import CORS
 
-import tflite_runtime.interpreter as tflite
+import tensorflow as tf
 from scipy.special import softmax
 
 app = Flask(__name__)
@@ -36,7 +36,7 @@ def load_model(model_name):
         if not os.path.exists(label_path):
             raise FileNotFoundError(f"Label file not found: {label_path}")
 
-        interpreter = tflite.Interpreter(model_path=model_path)
+        interpreter = tf.lite.Interpreter(model_path=model_path)
         interpreter.allocate_tensors()
         labels = load_labels(label_path)
         input_type = interpreter.get_input_details()[0]['dtype']
@@ -139,7 +139,6 @@ def predict():
         elif model_name == "obstacle_detection":
             voice_text = f"Obstacle ahead: {label}"
 
-        # Return only voice_text if requested (audio_only=true)
         if request.args.get("audio_only") == "true":
             return jsonify({"voice_text": voice_text})
 
